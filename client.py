@@ -6,6 +6,7 @@ import os
 import logging
 import tarfile
 import hglib
+import shutil
 
 tc_namespace = 'tc-vcs.v1.clones'
 tc_queue = 'https://queue.taskcluster.net/v1'
@@ -92,6 +93,10 @@ def use_cache_if_available(alias, namespace, dest):
     # untar the file to the destination
     with tarfile.open(local_cache_path) as tar:
         tar.extractall(dest)
+    tarfolder = os.path.join(dest, os.listdir(dest)[0])
+    for filename in os.listdir(tarfolder):
+        shutil.move(os.path.join(tarfolder, filename), os.path.join(dest, filename))
+    os.rmdir(tarfolder)
 
     return True
 
