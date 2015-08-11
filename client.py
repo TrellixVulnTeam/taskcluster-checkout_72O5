@@ -1,9 +1,10 @@
 import hashlib
 import urlparse
-import requests
+import urllib2
 import argparse
 import os
 import logging
+import json
 import tarfile
 import hglib
 import shutil
@@ -12,6 +13,8 @@ tc_namespace = 'tc-vcs.v1.clones'
 tc_queue = 'https://queue.taskcluster.net/v1'
 tc_index = 'https://index.taskcluster.net/v1'
 cache_dir = os.path.join(os.path.expanduser('~'), '.tc-vcs')
+
+log = logging.getLogger(__name__)
 
 
 def get_alias(url):
@@ -40,9 +43,9 @@ def lookup_remote_cache(namespace, artifact):
     :return: url of the artifact, None if the url is unavailable
     """
     url = urljoin(tc_index, 'task', namespace)
-    r = requests.get(url)
+    r = urllib2.urlopen(url)
     try:
-        task = r.json()
+        task = json.load(r.read())
     except ValueError:
         logging.warn("Unable to retrieve task from {}".format(url))
         return None
@@ -51,18 +54,31 @@ def lookup_remote_cache(namespace, artifact):
     return url
 
 
-def download_file(url, dest):
+def download_file(url, dest, grabchunk=1024 * 4):
     """
     Download a file to disk
     :param url: Url of item to download
     :param dest: path to save the file
     """
-    r = requests.get(url, stream=True)
-    with open(dest, 'wb') as f:
-        for chunk in r.iter_content(chunk_size=1024):
-            if chunk:
-                f.write(chunk)
-                f.flush()
+    try:
+        f = urllib2.urlopen(url)
+        log.debug("opened {} for reading".format(url))
+        with open(dest, 'wb') as out:
+            k = True
+            size = 0
+            while k:
+                indata = f.read(grabchunk)
+                out.write(indata)
+                size += len(indata)
+                if indata == '':
+                    k - False
+            log.info("File {} downloaded from {}".format(dest, os.path.basename(url)))
+    except (urllib2.URLError, urllib2.HTTPError, ValueError) as e:
+        log.info("... failed to download {} from {}".format(dest, os.path.basename(url)))
+        log.debug("{}".format(e))
+    except IOError:
+        log.info("failed to write to file for {}".format(dest), exc_info=True)
+
     return os.path.exists(dest)
 
 
@@ -87,7 +103,6 @@ def use_cache_if_available(alias, namespace, dest):
             logging.info("Failed to find remote cache for {}".format(artifact_path))
             return False
         if not download_file(url, local_cache_path):
-            logging.info("Unable to download {}".format(url))
             return False
 
     # untar the file to the destination
@@ -161,4 +176,4 @@ def main(argv, _skip_logging=False):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    clone('https://hg.mozilla.org/build/mozharness', os.path.expanduser('~/test'))
+    clone('https://hg.mozilla.org/build/mozharness', os.path.expanduser('test'))
