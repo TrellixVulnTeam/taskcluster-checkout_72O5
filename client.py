@@ -160,17 +160,6 @@ def clone(url, dest):
         return False
 
 
-def checkout_revision(repo, rev):
-    log.info("checking out revision {} of {}".format(rev, repo))
-    client = hglib.open(repo)
-    client.pull(rev=rev)
-    client.update(rev=rev)
-
-
-def checkout(dest, baseUrl, headUrl):
-    pass
-
-
 class Subcommand(object):
     def make_parser(self, subparsers):
         raise NotImplementedError
@@ -186,24 +175,37 @@ class CheckoutSubcommand(Subcommand):
                             help='Target directory which to clone and update')
         parser.add_argument('baseUrl', default=None,
                             help='Base repository to clone')
-        parser.add_argument('headUrl', default=None,
+        parser.add_argument('headUrl', default=None, nargs='?',
                             help='Head url to fetch changes from. If this value is not given '
                                  'baseUrl is used.')
-        parser.add_argument('headRev', default=None,
+        parser.add_argument('headRev', default=None, nargs='?',
                             help='Revision/changeset to pull from the repository. If not given '
                                  'this defaults to the "tip"/"master" of the default branch.')
-        parser.add_argument('headRef', default=None,
+        parser.add_argument('headRef', default=None, nargs='?',
                             help=' Reference on head to fetch this should usually be the same '
                                  'value as headRev primarily this may be needed for cases where '
                                  'you are fetching a revision from a git branch but must fetch the '
                                  'reference and then proceed to checkout the particular revision '
                                  'you want (git generally does not support pulling specific '
-                                 'revisions only references). If not given defaults to headRev.')
+                                 'revisions only references). If not given defaults to headRev. '
+                                 'NOTE: This option is not currently supported and is ignored.')
         return parser
 
     def run(self, parser, args):
-        import pprint
-        pprint.pprint(args)
+        if not clone(args.baseUrl, args.directory):
+            return
+
+        client = hglib.open(args.directory)
+
+        if args.headUrl is None:
+            args.headUrl = args.baseUrl
+        if args.headRev is None:
+            args.headRev = client.branch()
+
+        log.debug("updating {} to revision '{}' from {}"
+                  .format(args.directory, args.headRev, args.headUrl))
+        client.pull(source=args.headUrl, rev=args.headRev)
+        client.update(rev=args.headRev)
 
 
 def main(argv):
