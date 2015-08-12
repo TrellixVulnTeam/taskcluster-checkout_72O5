@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 import hashlib
 import urlparse
 import urllib2
@@ -11,10 +15,10 @@ import sys
 import os
 import hglib
 
-tc_namespace = 'tc-vcs.v1.clones'
-tc_queue = 'https://queue.taskcluster.net/v1'
-tc_index = 'https://index.taskcluster.net/v1'
-cache_dir = os.path.join(os.path.expanduser('~'), '.tc-vcs')
+TC_NAMESPACE = 'tc-vcs.v1.clones'
+TC_QUEUE = 'https://queue.taskcluster.net/v1'
+TC_INDEX = 'https://index.taskcluster.net/v1'
+CACHE_DIR = os.path.join(os.path.expanduser('~'), '.tc-vcs')
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +48,7 @@ def lookup_remote_cache(namespace, artifact):
     :param artifact: the name of the artifact to download
     :return: url of the artifact, None if the url is unavailable
     """
-    url = urljoin(tc_index, 'task', namespace)
+    url = urljoin(TC_INDEX, 'task', namespace)
     r = urllib2.urlopen(url)
     try:
         task = json.load(r.read())
@@ -52,7 +56,8 @@ def lookup_remote_cache(namespace, artifact):
         log.info("unable to retrieve task from {}".format(url))
         return None
 
-    url = urljoin(tc_queue, 'task', task['taskId'], 'artifacts', artifact)
+    url = urljoin(TC_QUEUE, 'task', task['taskId'], 'artifacts', artifact)
+    log.debug("remote cache located '{}'".format(url))
     return url
 
 
@@ -61,6 +66,7 @@ def download_file(url, dest, grabchunk=1024 * 4):
     Download a file to disk
     :param url: Url of item to download
     :param dest: path to save the file
+    :param grabchunk: chunk size to download file in
     """
     try:
         f = urllib2.urlopen(url)
@@ -93,7 +99,7 @@ def use_cache_if_available(alias, namespace, dest):
     """
     # use the alias like a path, so normalize the path
     local_cache_path = os.path.normpath(
-        os.path.join(cache_dir, 'clones', '{}.tar.gz'.format(alias)))
+        os.path.join(CACHE_DIR, 'clones', '{}.tar.gz'.format(alias)))
 
     if not os.path.exists(local_cache_path):
         # download from the remote path
@@ -119,7 +125,7 @@ def use_cache_if_available(alias, namespace, dest):
     return True
 
 
-def valid_hg_repo(repo_path, alias):
+def repo_is_hg(repo_path, alias):
     """
     Check if a path is a valid mercurial repository
     :param repo_path: Path to the local mercurial repository
@@ -142,8 +148,14 @@ def valid_hg_repo(repo_path, alias):
 
 
 def clone(url, dest):
+    """
+    Clone a repository by consulting local and remote caches first
+    :param url: URL to the remote repository
+    :param dest: Folder to save the repository to
+    :return: true is successful, false otherwise
+    """
     alias = get_alias(url)
-    namespace = '{}.{}'.format(tc_namespace, hashlib.md5(alias).hexdigest())
+    namespace = '{}.{}'.format(TC_NAMESPACE, hashlib.md5(alias).hexdigest())
     if not os.path.exists(dest):
         # check if we can use a cache
         if not use_cache_if_available(alias, namespace, dest):
@@ -151,7 +163,7 @@ def clone(url, dest):
             logging.info("cloning the repository without cache")
             hglib.clone(url, dest)
 
-    if valid_hg_repo(dest, alias):
+    if repo_is_hg(dest, alias):
         log.debug("pulling latest revisions to repository")
         client = hglib.open(dest)
         return client.pull()
