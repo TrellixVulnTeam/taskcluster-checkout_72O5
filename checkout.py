@@ -172,65 +172,45 @@ def clone(url, dest):
         return False
 
 
-class Subcommand(object):
-    def make_parser(self, subparsers):
-        raise NotImplementedError
+def checkout(directory, base_url, head_url=None, head_rev=None):
+    if not clone(base_url, directory):
+        return
 
-    def run(self, parser, args):
-        pass
+    client = hglib.open(directory)
 
+    if head_url is None:
+        head_url = base_url
+    if head_rev is None:
+        head_rev = client.branch()
 
-class CheckoutSubcommand(Subcommand):
-    def make_parser(self, subparsers):
-        parser = subparsers.add_parser('checkout', help='checkout a repository')
-        parser.add_argument('directory', default=None,
-                            help='Target directory which to clone and update')
-        parser.add_argument('baseUrl', default=None,
-                            help='Base repository to clone')
-        parser.add_argument('headUrl', default=None, nargs='?',
-                            help='Head url to fetch changes from. If this value is not given '
-                                 'baseUrl is used.')
-        parser.add_argument('headRev', default=None, nargs='?',
-                            help='Revision/changeset to pull from the repository. If not given '
-                                 'this defaults to the "tip"/"master" of the default branch.')
-        parser.add_argument('headRef', default=None, nargs='?',
-                            help=' Reference on head to fetch this should usually be the same '
-                                 'value as headRev primarily this may be needed for cases where '
-                                 'you are fetching a revision from a git branch but must fetch the '
-                                 'reference and then proceed to checkout the particular revision '
-                                 'you want (git generally does not support pulling specific '
-                                 'revisions only references). If not given defaults to headRev. '
-                                 'NOTE: This option is not currently supported and is ignored.')
-        return parser
-
-    def run(self, parser, args):
-        if not clone(args.baseUrl, args.directory):
-            return
-
-        client = hglib.open(args.directory)
-
-        if args.headUrl is None:
-            args.headUrl = args.baseUrl
-        if args.headRev is None:
-            args.headRev = client.branch()
-
-        log.debug("updating {} to revision '{}' from {}"
-                  .format(args.directory, args.headRev, args.headUrl))
-        client.pull(source=args.headUrl, rev=args.headRev)
-        client.update(rev=args.headRev)
+    log.debug("updating {} to revision '{}' from {}".format(directory, head_rev, head_url))
+    client.pull(source=head_url, rev=head_rev)
+    client.update(rev=head_rev)
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(description="Taskcluster-vcs client")
-    subparsers = parser.add_subparsers(help='subcommand help')
-
-    cmds = [cls() for cls in Subcommand.__subclasses__()]
-    for cmd in cmds:
-        subparser = cmd.make_parser(subparsers)
-        subparser.set_defaults(_subcommand=cmd)
+    parser = argparse.ArgumentParser('Checkout a repository')
+    parser.add_argument('directory', default=None,
+                        help='Target directory which to clone and update')
+    parser.add_argument('baseUrl', default=None,
+                        help='Base repository to clone')
+    parser.add_argument('headUrl', default=None, nargs='?',
+                        help='Head url to fetch changes from. If this value is not given '
+                             'baseUrl is used.')
+    parser.add_argument('headRev', default=None, nargs='?',
+                        help='Revision/changeset to pull from the repository. If not given '
+                             'this defaults to the "tip"/"master" of the default branch.')
+    parser.add_argument('headRef', default=None, nargs='?',
+                        help=' Reference on head to fetch this should usually be the same '
+                             'value as headRev primarily this may be needed for cases where '
+                             'you are fetching a revision from a git branch but must fetch the '
+                             'reference and then proceed to checkout the particular revision '
+                             'you want (git generally does not support pulling specific '
+                             'revisions only references). If not given defaults to headRev. '
+                             'NOTE: This option is not currently supported and is ignored.')
 
     args = parser.parse_args(argv[1:])
-    args._subcommand.run(parser, args)
+    checkout(args.directory, args.baseUrl, args.headUrl, args.headRev)
 
 
 if __name__ == '__main__':
