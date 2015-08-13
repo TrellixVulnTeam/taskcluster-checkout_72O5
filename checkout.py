@@ -1,7 +1,6 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
 import hashlib
 import urlparse
 import urllib2
@@ -41,26 +40,6 @@ def urljoin(*args):
     return "/".join(map(lambda x: str(x).rstrip('/'), args))
 
 
-def lookup_remote_cache(namespace, artifact):
-    """
-    Lookup a cached version of an artifact from the latest task in a certain namespace.
-    :param namespace: namespace of the cache to search
-    :param artifact: the name of the artifact to download
-    :return: url of the artifact, None if the url is unavailable
-    """
-    url = urljoin(TC_INDEX, 'task', namespace)
-    r = urllib2.urlopen(url)
-    try:
-        task = json.load(r.read())
-    except ValueError:
-        log.info("unable to retrieve task from {}".format(url))
-        return None
-
-    url = urljoin(TC_QUEUE, 'task', task['taskId'], 'artifacts', artifact)
-    log.debug("remote cache located '{}'".format(url))
-    return url
-
-
 def download_file(url, dest, grabchunk=1024 * 4):
     """
     Download a file to disk
@@ -90,7 +69,7 @@ def download_file(url, dest, grabchunk=1024 * 4):
     return os.path.exists(dest)
 
 
-def use_cache_if_available(alias, namespace, dest):
+def clone_from_cache(alias, namespace, dest, cache_dir=CACHE_DIR):
     """
     Uses a cached version of a repository, either from a local or remote cache.
     :param alias: The name of the repository
@@ -99,17 +78,27 @@ def use_cache_if_available(alias, namespace, dest):
     """
     # use the alias like a path, so normalize the path
     local_cache_path = os.path.normpath(
-        os.path.join(CACHE_DIR, 'clones', '{}.tar.gz'.format(alias)))
+        os.path.join(cache_dir, 'clones', '{}.tar.gz'.format(alias)))
 
     if not os.path.exists(local_cache_path):
         # download from the remote path
         if not os.path.exists(os.path.dirname(local_cache_path)):
             os.makedirs(os.path.dirname(local_cache_path))
+
+        # retrieve taskid of most recent artifact upload
         artifact_path = 'public/{}.tar.gz'.format(alias)
-        url = lookup_remote_cache(namespace, artifact_path)
-        if not url:
-            logging.info("failed to find remote cache for {}".format(artifact_path))
+        latest_artifact_url = urljoin(TC_INDEX, 'task', namespace)
+        try:
+            r = urllib2.urlopen(latest_artifact_url)
+            task = json.load(r.read())
+        except (urllib2.URLError, urllib2.HTTPError, ValueError) as e:
+            log.info("unable to retrieve task from {}".format(latest_artifact_url))
+            log.debug("{}".format(e))
             return False
+
+        # create the download url of the artifact
+        url = urljoin(TC_QUEUE, 'task', task['taskId'], 'artifacts', artifact_path)
+        log.debug("remote cache located '{}'".format(url))
         if not download_file(url, local_cache_path):
             return False
 
@@ -125,7 +114,7 @@ def use_cache_if_available(alias, namespace, dest):
     return True
 
 
-def repo_is_hg(repo_path, alias):
+def path_is_hg_repo(repo_path, alias):
     """
     Check if a path is a valid mercurial repository
     :param repo_path: Path to the local mercurial repository
@@ -147,9 +136,18 @@ def repo_is_hg(repo_path, alias):
         return False
 
 
+def revision(repo):
+    try:
+        client = hglib.open(repo)
+        return client.identify().split()[0]
+    except (hglib.error.CommandError, ValueError):
+        log.error("unable to get current revision from '{}'".format(repo))
+        return None
+
+
 def clone(url, dest):
     """
-    Clone a repository by consulting local and remote caches first
+    Clone a repository, taking advantage of taskcluster caches
     :param url: URL to the remote repository
     :param dest: Folder to save the repository to
     :return: true is successful, false otherwise
@@ -158,12 +156,12 @@ def clone(url, dest):
     namespace = '{}.{}'.format(TC_NAMESPACE, hashlib.md5(alias).hexdigest())
     if not os.path.exists(dest):
         # check if we can use a cache
-        if not use_cache_if_available(alias, namespace, dest):
+        if not clone_from_cache(alias, namespace, dest):
             # check out a clone
             logging.info("cloning the repository without cache")
             hglib.clone(url, dest)
 
-    if repo_is_hg(dest, alias):
+    if path_is_hg_repo(dest, alias):
         log.debug("pulling latest revisions to repository")
         client = hglib.open(dest)
         return client.pull()
@@ -173,23 +171,28 @@ def clone(url, dest):
 
 
 def checkout(directory, base_url, head_url=None, head_rev=None):
-    if not clone(base_url, directory):
-        return
+    """
+    Checkout a repository, taking advantage of taskcluster caches
+    :param directory: directory to store the repository
+    :param base_url: url to repository to clone from
+    :param head_url: url to repository to pull changes from
+    :param head_rev: revision to update to
+    """
+    if clone(base_url, directory):
+        client = hglib.open(directory)
 
-    client = hglib.open(directory)
+        if head_url is None:
+            head_url = base_url
+        if head_rev is None:
+            head_rev = client.branch()
 
-    if head_url is None:
-        head_url = base_url
-    if head_rev is None:
-        head_rev = client.branch()
-
-    log.debug("updating {} to revision '{}' from {}".format(directory, head_rev, head_url))
-    client.pull(source=head_url, rev=head_rev)
-    client.update(rev=head_rev)
+        log.debug("updating {} to revision '{}' from {}".format(directory, head_rev, head_url))
+        client.pull(source=head_url, rev=head_rev)
+        client.update(rev=head_rev)
 
 
-def main(argv):
-    parser = argparse.ArgumentParser('Checkout a repository')
+def main(argv=None):
+    parser = argparse.ArgumentParser()
     parser.add_argument('directory', default=None,
                         help='Target directory which to clone and update')
     parser.add_argument('baseUrl', default=None,
@@ -209,10 +212,13 @@ def main(argv):
                              'revisions only references). If not given defaults to headRev. '
                              'NOTE: This option is not currently supported and is ignored.')
 
-    args = parser.parse_args(argv[1:])
+    logging.basicConfig(level=logging.DEBUG)
+    if argv is None:
+        argv = sys.argv[1:]
+
+    args = parser.parse_args(argv)
     checkout(args.directory, args.baseUrl, args.headUrl, args.headRev)
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
-    sys.exit(main(sys.argv))
+    sys.exit(main(sys.argv[1:]))
