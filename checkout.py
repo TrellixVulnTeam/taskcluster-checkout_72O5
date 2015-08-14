@@ -65,8 +65,8 @@ def download_file(url, dest, grabchunk=1024 * 4):
                 if indata == '':
                     k = False
             log.info("file {} downloaded from {}".format(dest, os.path.basename(url)))
-            shutil.move(temp_path, dest)
-            path = dest
+        shutil.move(temp_path, dest)
+        path = dest
     except (urllib2.URLError, urllib2.HTTPError, ValueError) as e:
         log.info("... failed to download {} from {}".format(dest, os.path.basename(url)))
         log.debug("{}".format(e))
@@ -122,12 +122,11 @@ def clone_from_cache(alias, namespace, dest, cache_dir=CACHE_DIR):
 
     # untar the file to the destination
     log.debug("extracting {} to {}".format(local_cache_path, dest))
+    temp_dir = tempfile.mkdtemp()
     with tarfile.open(local_cache_path) as tar:
-        tar.extractall(dest)
-    tarfolder = os.path.join(dest, os.listdir(dest)[0])
-    for filename in os.listdir(tarfolder):
-        shutil.move(os.path.join(tarfolder, filename), os.path.join(dest, filename))
-    os.rmdir(tarfolder)
+        tar.extractall(temp_dir)
+    tarfolder = os.path.join(temp_dir, os.listdir(temp_dir)[0])
+    shutil.move(tarfolder, dest)
 
     return True
 
