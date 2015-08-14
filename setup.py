@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(name='taskcluster-checkout',
       package=['taskcluster-checkout'],
-      version='0.1.0',
+      version='0.1.1',
       description='Checkout cached repositories served by TaskCluster',
       author='Anthony Miyaguchi',
       author_email='amiyaguchi@mozilla.com',
