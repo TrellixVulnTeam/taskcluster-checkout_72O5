@@ -6,6 +6,7 @@ python:
 # command to install dependencies
 install:
   - "pip install -e .[test]"
+  - "pip install mercurial"
   - "pip install coverage"
   - "pip install codecov"
   - "pip freeze"
