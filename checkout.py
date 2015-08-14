@@ -123,7 +123,7 @@ def clone_from_cache(alias, namespace, dest, cache_dir=CACHE_DIR):
     # untar the file to the destination
     log.debug("extracting {} to {}".format(local_cache_path, dest))
     temp_dir = tempfile.mkdtemp()
-    with tarfile.open(local_cache_path) as tar:
+    with tarfile.open(local_cache_path, errorlevel=0) as tar:
         tar.extractall(temp_dir)
     tarfolder = os.path.join(temp_dir, os.listdir(temp_dir)[0])
     shutil.move(tarfolder, dest)
