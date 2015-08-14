@@ -6,9 +6,14 @@ TaskCluster Checkout (tc-checkout)
 This is a python client to access cached mercurial repositories served by TaskCluster.
 
 ### Running taskcluster-checkout
+You can install this package via PyPI:
+
+    pip install taskcluster-checkout
 
 To run the tool for development, pip install the requirements into your virtualenv:
 
+    git checkout https://github.com/acmiyaguchi/taskcluster-checkout.git
+    cd taskcluster-checkout
     pip install -e .[test]
 
 The `[test]` installs the requirements for testing as well.
