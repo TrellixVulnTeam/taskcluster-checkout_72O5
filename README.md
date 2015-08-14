@@ -1,5 +1,7 @@
 TaskCluster Checkout (tc-checkout)
 ==================================
+[![Build Status](https://travis-ci.org/acmiyaguchi/taskcluster-checkout.svg?branch=master)](https://travis-ci.org/acmiyaguchi/taskcluster-checkout)
+[![codecov.io](http://codecov.io/github/acmiyaguchi/taskcluster-checkout/coverage.svg?branch=master)](http://codecov.io/github/acmiyaguchi/taskcluster-checkout?branch=master)
 
 This is a python client to access cached mercurial repositories served by TaskCluster.
 
