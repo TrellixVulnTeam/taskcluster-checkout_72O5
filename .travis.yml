@@ -1,0 +1,18 @@
+language: python
+sudo: false
+python:
+  - "2.7"
+
+# command to install dependencies
+install:
+  - "pip install -e .[test]"
+  - "pip install coverage"
+  - "pip install codecov"
+  - "pip freeze"
+
+# run everything in a single script, so we get a nice summary at the end
+script:
+  - bash ./validate.sh
+
+after_success:
+  - codecov
