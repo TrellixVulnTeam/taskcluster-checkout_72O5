@@ -10,6 +10,7 @@ import json
 import tarfile
 import shutil
 import sys
+import tempfile
 
 import os
 import hglib
@@ -47,10 +48,14 @@ def download_file(url, dest, grabchunk=1024 * 4):
     :param dest: path to save the file
     :param grabchunk: chunk size to download file in
     """
+    path = None
+    temp_dir = tempfile.mkdtemp()
+    temp_path = os.path.join(temp_dir, os.path.basename(dest))
     try:
-        f = urllib2.urlopen(url)
+        req = urllib2.Request(url)
+        f = urllib2.urlopen(req)
         log.debug("opened {} for reading".format(url))
-        with open(dest, 'wb') as out:
+        with open(temp_path, 'wb') as out:
             k = True
             size = 0
             while k:
@@ -58,15 +63,32 @@ def download_file(url, dest, grabchunk=1024 * 4):
                 out.write(indata)
                 size += len(indata)
                 if indata == '':
-                    k - False
+                    k = False
             log.info("file {} downloaded from {}".format(dest, os.path.basename(url)))
+            shutil.move(temp_path, dest)
+            path = dest
     except (urllib2.URLError, urllib2.HTTPError, ValueError) as e:
         log.info("... failed to download {} from {}".format(dest, os.path.basename(url)))
         log.debug("{}".format(e))
-    except IOError:
+    except IOError:  # pragma: no cover
         log.info("failed to write to file for {}".format(dest), exc_info=True)
 
-    return os.path.exists(dest)
+    shutil.rmtree(temp_dir)
+    return path
+
+
+def get_latest_taskid(namespace):
+    """ get the taskid of the latest artifact in a namespace"""
+    latest_artifact_url = urljoin(TC_INDEX, 'task', namespace)
+    try:
+        req = urllib2.Request(latest_artifact_url)
+        resp = urllib2.urlopen(req)
+        task = json.loads(resp.read())
+    except (urllib2.URLError, urllib2.HTTPError, ValueError) as e:
+        log.info("unable to retrieve task from {}".format(latest_artifact_url))
+        log.debug("{}".format(e))
+        return None
+    return task['taskId']
 
 
 def clone_from_cache(alias, namespace, dest, cache_dir=CACHE_DIR):
@@ -86,18 +108,14 @@ def clone_from_cache(alias, namespace, dest, cache_dir=CACHE_DIR):
             os.makedirs(os.path.dirname(local_cache_path))
 
         # retrieve taskid of most recent artifact upload
-        artifact_path = 'public/{}.tar.gz'.format(alias)
-        latest_artifact_url = urljoin(TC_INDEX, 'task', namespace)
-        try:
-            r = urllib2.urlopen(latest_artifact_url)
-            task = json.load(r.read())
-        except (urllib2.URLError, urllib2.HTTPError, ValueError) as e:
-            log.info("unable to retrieve task from {}".format(latest_artifact_url))
-            log.debug("{}".format(e))
+        task_id = get_latest_taskid(namespace)
+        if task_id is None:
             return False
 
+        artifact_path = 'public/{}.tar.gz'.format(alias)
+
         # create the download url of the artifact
-        url = urljoin(TC_QUEUE, 'task', task['taskId'], 'artifacts', artifact_path)
+        url = urljoin(TC_QUEUE, 'task', task_id, 'artifacts', artifact_path)
         log.debug("remote cache located '{}'".format(url))
         if not download_file(url, local_cache_path):
             return False
@@ -213,7 +231,7 @@ def main(argv=None):
                              'NOTE: This option is not currently supported and is ignored.')
 
     logging.basicConfig(level=logging.DEBUG)
-    if argv is None:
+    if argv is None:  # pragma: no cover
         argv = sys.argv[1:]
 
     args = parser.parse_args(argv)

@@ -1,10 +1,13 @@
 import checkout
 import shutil
 import os
+import contextlib
+import mock
+import urllib2
+import sys
 
 from nose.tools import eq_
 from testfixtures import tempdir
-from mock import patch
 
 TEST_HG_REPO_REMOTE = 'https://bitbucket.org/acmiyaguchi/tc-hg-testing'
 TEST_HG_REPO_ALIAS = 'bitbucket.org/acmiyaguchi/tc-hg-testing'
@@ -41,6 +44,43 @@ def set_hg_repo_path(repo, remote):
     return True
 
 
+@contextlib.contextmanager
+def mocked_urllib2(data, no_size=False, exp_size=4096, exp_token=None):
+    with mock.patch('urllib2.urlopen') as urlopen:
+        def fake_read(url, size):
+            eq_(size, exp_size)
+            remaining = data[url]
+            rv, remaining = remaining[:size], remaining[size:]
+            data[url] = remaining
+            return rv
+
+        def replacement(req):
+            url = req.get_full_url()
+            if url not in data:
+                raise urllib2.URLError("bogus url")
+            m = mock.Mock(name='Response')
+            if no_size:
+                def mocked_read():
+                    return fake_read(url, exp_size)
+                m.read = mocked_read
+            else:
+                m.read = lambda size: fake_read(url, size)
+            return m
+        urlopen.side_effect = replacement
+        yield
+
+
+def call_main(*args):
+    try:
+        old_stderr = sys.stderr
+        sys.stderr = sys.stdout
+        try:
+            return checkout.main(list(args))
+        except SystemExit, e:
+            return "exit %d" % e.code
+    finally:
+        sys.stderr = old_stderr
+
 ###############################################################################
 # Unit and Coverage Tests
 ###############################################################################
@@ -72,13 +112,19 @@ def test_urljoin_right_slashes():
 @tempdir()
 def test_download_file(tmpdir):
     """ download a file to disk, assert that location exists on disk"""
-    pass
+    output = os.path.join(tmpdir.path, 'file')
+    with mocked_urllib2({'http://foo.bar/baz': 'abcd'}):
+        checkout.download_file('http://foo.bar/baz', output)
+        eq_(open(output).read(), 'abcd')
 
 
 @tempdir()
 def test_download_file_invalid_url(tmpdir):
     """ download should fail when the url is invalid"""
-    pass
+    output = os.path.join(tmpdir.path, 'file')
+    with mocked_urllib2({'http://foo.bar/baz': 'abcd'}):
+        assert not checkout.download_file('http://foo.bar/qux', output)
+
 
 
 @tempdir()
@@ -93,8 +139,18 @@ def test_clone_from_cache_local(tmpdir):
 
 @tempdir()
 def test_clone_from_cache_remote(tmpdir):
-    """ this downloads a file from a remote cache and extracts the repository."""
-    pass
+    """ this should fail since the remote is invalid."""
+    latest_artifact_url = checkout.urljoin(checkout.TC_INDEX, 'task', 'bar')
+    with mocked_urllib2({latest_artifact_url: '{"taskId":"baz"}'}, no_size=True):
+        assert not checkout.clone_from_cache('foo', 'bar', None, tmpdir.path)
+
+
+@tempdir()
+def test_clone_from_cache_bad_namespace(tmpdir):
+    """ this should fail since the namespace is invalid."""
+    latest_artifact_url = checkout.urljoin(checkout.TC_INDEX, 'task', 'bar')
+    with mocked_urllib2({'http://bad.url/': '{"taskId":"baz"}'}, no_size=True):
+        assert not checkout.clone_from_cache('foo', 'bar', None, tmpdir.path)
 
 
 @tempdir()
@@ -134,7 +190,7 @@ def test_invalid_revision(tmpdir):
 def test_clone_already_exists(tmpdir):
     """ cloning operation should not call any cloning operations and succeed"""
     output = setup_hg_repo(tmpdir.path)
-    with patch('checkout.clone_from_cache') as mocked:
+    with mock.patch('checkout.clone_from_cache') as mocked:
         assert checkout.clone(TEST_HG_REPO_REMOTE, output)
         assert not mocked.called
 
@@ -148,7 +204,7 @@ def test_clone_no_cache(tmpdir):
 
     local_remote = setup_hg_repo(tmpdir.path)
     output = os.path.join(tmpdir.path, 'cloned_repo')
-    with patch('checkout.clone_from_cache', side_effect=mocked_cache):
+    with mock.patch('checkout.clone_from_cache', side_effect=mocked_cache):
         assert checkout.clone(local_remote, output)
         assert os.path.exists(os.path.join(output, '.hg', 'hgrc'))
 
@@ -178,3 +234,15 @@ def test_checkout_revision(tmpdir):
     checkout.checkout(output, remote, head_rev='123df26ca0f5')
     eq_(checkout.revision(output), '123df26ca0f5')
 
+
+def test_main_no_command():
+    eq_(call_main(), "exit 2")
+
+
+def test_main_checkout():
+    def do_nothing(*args):
+        pass
+
+    with mock.patch('checkout.checkout', side_effect=do_nothing) as mocked:
+        call_main('dir', 'remote')
+        mocked.assert_called_with('dir', 'remote', None, None)
